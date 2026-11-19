@@ -121,7 +121,7 @@
   .splitrow{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-family:var(--mono);font-size:13px}
   .splitrow:first-child{border-top:0}
   .splitrow .si{width:14px;height:14px;border-radius:4px;flex:none}
-  .splitrow .si.run{background:var(--accent)} .splitrow .si.sta{background:var(--sta)}
+  .splitrow .si.run{background:var(--accent)} .splitrow .si.sta{background:var(--sta)} .splitrow .si.rest{background:var(--warn)}
   .splitrow .sl{flex:1;min-width:0;font-family:var(--sans);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .splitrow .ss{font-weight:700} .splitrow .sc{color:var(--faint);width:62px;text-align:right}
 
@@ -266,13 +266,52 @@ const CAT={
 const RACE_ORDER=["ski","push","pull","burpee","row","farmer","lunge","wall"];
 function run(m){ return {type:"run",key:"run",name:"Run",target:m+" m",meters:+m}; }
 function sta(k,target){ return {type:"station",key:k,name:CAT[k].name,target:target||CAT[k].def}; }
+function rest(label){ return {type:"rest",key:"rest",name:"Rest",target:label}; }
+function segLabel(s){ return s.type==="run"?("Run "+s.target): s.type==="rest"?("Rest "+s.target): s.name; }
+function segColorVar(t){ return t==="run"?"var(--accent)": t==="rest"?"var(--warn)":"var(--sta)"; }
+function segClass(t){ return t==="run"?"run": t==="rest"?"rest":"sta"; }
+function rounds(n,piecesFn,restLabel){ const s=[]; for(let i=0;i<n;i++){ piecesFn(i).forEach(p=>s.push(p)); if(restLabel&&i<n-1) s.push(rest(restLabel)); } return s; }
 function fullSegs(){ const s=[]; RACE_ORDER.forEach(k=>{ s.push(run(1000)); s.push(sta(k)); }); return s; }
 function halfSegs(){ return ["ski","push","pull","burpee"].flatMap(k=>[run(1000),sta(k)]); }
 
 function builtinFormats(){
   return [
-    {id:"full", name:"Full Hyrox", isBenchmark:true, builtin:true, desc:"Official race — 8×1 km run + 8 stations, in order.", segments:fullSegs()},
-    {id:"half", name:"Half Hyrox", isBenchmark:false, builtin:true, desc:"4 rounds · run + station (Ski, Sled Push, Sled Pull, Burpees).", segments:halfSegs()}
+    {id:"full", name:"Full Hyrox", isBenchmark:true, builtin:true, group:"Benchmark & test",
+      desc:"Official race — 8×1 km run + 8 stations, in order.", segments:fullSegs()},
+    {id:"half", name:"Half Hyrox", isBenchmark:false, builtin:true, group:"Benchmark & test",
+      desc:"4 rounds · run + station (Ski, Sled Push, Sled Pull, Burpees).", segments:halfSegs()},
+
+    {id:"ladder", name:"Descending Race Ladder", isBenchmark:false, builtin:true, group:"Race-prep sessions", cap:"35:00",
+      desc:"Closing Distance — stations in race order, descending runs. For time; RPE 8.",
+      segments:[run(1600),sta("ski","40/32 cal"),run(1200),sta("burpee","40 m"),run(800),sta("row","40/32 cal"),sta("wall","100 · 9/6 kg")]},
+
+    {id:"interval", name:"Hyrox Interval Session", isBenchmark:false, builtin:true, group:"Race-prep sessions",
+      desc:"5 rounds for time · 2 min rest. Compromised-running conditioning. Scale loads so you keep moving.",
+      segments:rounds(5,()=>[run(400),sta("wall","20 reps"),sta("push","15 m"),sta("burpee","10 reps")],"2 min")},
+
+    {id:"wallrun", name:"Wall Ball Running", isBenchmark:false, builtin:true, group:"Race-prep sessions",
+      desc:"4 rounds · 90s rest. Wall balls first, then run straight out on jelly legs — hold race pace.",
+      segments:rounds(4,()=>[sta("wall","20 reps"),run(800)],"90 sec")},
+
+    {id:"sledsprint", name:"Sled + Sprint", isBenchmark:false, builtin:true, group:"Race-prep sessions",
+      desc:"6 rounds · 2 min rest. Heavy sled under 60s, then attack a hard 400 — train the sled-to-run spike.",
+      segments:rounds(6,()=>[sta("push","25 m heavy"),run(400)],"2 min")},
+
+    {id:"lunges", name:"Loaded Lunges", isBenchmark:false, builtin:true, group:"Race-prep sessions",
+      desc:"5 rounds · 90s rest. Lunges under fatigue, then run tall at 5K pace. Rhythm over speed.",
+      segments:rounds(5,()=>[sta("lunge","20 m"),run(400)],"90 sec")},
+
+    {id:"burpee500", name:"Burpee 500s", isBenchmark:false, builtin:true, group:"Race-prep sessions",
+      desc:"5 rounds · 90s rest. Steady, repeatable burpees, control the HR spike, then run.",
+      segments:rounds(5,()=>[sta("burpee","10 reps"),run(500)],"90 sec")},
+
+    {id:"rowrun", name:"Row + Run 1Ks", isBenchmark:false, builtin:true, group:"Race-prep sessions",
+      desc:"4 rounds · 2 min rest. The row-to-run transition — drive the legs, then run tall off the erg.",
+      segments:rounds(4,()=>[sta("row","500 m hard"),run(1000)],"2 min")},
+
+    {id:"fullsim", name:"The Full Sim", isBenchmark:false, builtin:true, group:"Race-prep sessions",
+      desc:"4 rounds · 1 km run then one station (sled pull / ski / wall balls / lunges). Zero rest — closest to race day.",
+      segments:rounds(4,i=>[run(1000),sta(["pull","ski","wall","lunge"][i])],null)}
   ];
 }
 function allFormats(){ return builtinFormats().concat((state.customFormats||[]).map(f=>Object.assign({builtin:false},f))); }
@@ -289,7 +328,7 @@ function toast(msg,warn){ let t=document.getElementById("toast"); if(!t){ t=el("
 function fmt(ms){ if(ms==null||isNaN(ms)) return "--:--"; const s=Math.floor(ms/1000); const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60; const p=n=>String(n).padStart(2,"0"); return h? h+":"+p(m)+":"+p(ss):p(m)+":"+p(ss); }
 function fmtDate(ts){ return new Date(ts).toLocaleDateString(undefined,{day:"2-digit",month:"short"}); }
 function capMs(cap){ if(!cap) return null; const m=/^(\d{1,2}):(\d{2})$/.exec(cap.trim()); return m? (+m[1]*60+ +m[2])*1000 : null; }
-function segSummary(segs){ return segs.map(s=> s.type==="run"? ("Run "+s.target) : s.name).join(" → "); }
+function segSummary(segs){ return segs.map(segLabel).join(" → "); }
 function uid(){ return "c"+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 
 /* ---------- Live Timer engine ---------- */
@@ -344,10 +383,10 @@ const T={
   refresh(){ const o=this.overlay; if(!o) return;
     const cur=this.segs[this.idx], nxt=this.segs[this.idx+1];
     o.querySelector("#tSeg").textContent=(this.idx+1)+" / "+this.segs.length;
-    const pill=cur?`<span class="pill" style="background:${cur.type==="run"?"var(--accent)":"var(--sta)"}"></span>`:"";
-    o.querySelector("#tNowName").innerHTML=cur? pill+cur.name+(cur.type==="run"?(" "+cur.target):"") : "—";
+    const pill=cur?`<span class="pill" style="background:${segColorVar(cur.type)}"></span>`:"";
+    o.querySelector("#tNowName").innerHTML=cur? pill+segLabel(cur) : "—";
     const nm=cur&&cur.type==="station"? cur.target : "";
-    o.querySelector("#tNext").textContent=nxt? ("Next: "+(nxt.type==="run"?("Run "+nxt.target):nxt.name)) : (cur?"Last segment — finish strong":"");
+    o.querySelector("#tNext").textContent=nxt? ("Next: "+segLabel(nxt)) : (cur?"Last segment — finish strong":"");
     const ns=o.querySelector("#tNowSplit"); ns.classList.toggle("paused",this.paused);
     const pb=o.querySelector("#tPause"); if(pb) pb.textContent=this.paused?"Resume":"Pause";
     // station target subtitle under name
@@ -356,7 +395,7 @@ const T={
     // splits list
     const sp=o.querySelector("#tSplits"); sp.innerHTML="";
     this.laps.forEach((ms,i)=>{ const s=this.segs[i]; const r=el("div","splitrow");
-      r.innerHTML=`<span class="si ${s.type==="run"?"run":"sta"}"></span><span class="sl">${s.type==="run"?("Run "+s.target):s.name}</span><span class="ss">${fmt(ms)}</span>`;
+      r.innerHTML=`<span class="si ${segClass(s.type)}"></span><span class="sl">${segLabel(s)}</span><span class="ss">${fmt(ms)}</span>`;
       sp.appendChild(r); });
     sp.scrollTop=sp.scrollHeight;
     const lap=o.querySelector("#tLap"); lap.classList.toggle("finish",this.idx===this.segs.length-1);
@@ -377,7 +416,7 @@ const T={
     o.appendChild(head);
     const sp=el("div","splits"); sp.style.flex="1";
     let cum=0; segs.forEach(s=>{ cum+=s.splitMs||0; const r=el("div","splitrow");
-      r.innerHTML=`<span class="si ${s.type==="run"?"run":"sta"}"></span><span class="sl">${s.type==="run"?("Run "+s.target):s.name}</span><span class="ss">${fmt(s.splitMs)}</span><span class="sc">${fmt(cum)}</span>`;
+      r.innerHTML=`<span class="si ${segClass(s.type)}"></span><span class="sl">${segLabel(s)}</span><span class="ss">${fmt(s.splitMs)}</span><span class="sc">${fmt(cum)}</span>`;
       sp.appendChild(r); });
     o.appendChild(sp);
     o.appendChild(el("div",null,`<div class="note" style="margin:4px 0 2px">Rate the effort (RPE)</div>`));
@@ -439,9 +478,9 @@ function weekStrip(){
 
 function formatCard(f,opts){
   const c=el("div","fmt");
-  const nSta=f.segments.filter(s=>s.type==="station").length, nRun=f.segments.filter(s=>s.type==="run").length;
+  const nSta=f.segments.filter(s=>s.type==="station").length, nRun=f.segments.filter(s=>s.type==="run").length, nRest=f.segments.filter(s=>s.type==="rest").length;
   c.innerHTML=`<div class="fh"><span class="fn">${f.name}</span>${f.isBenchmark?'<span class="bench">Benchmark</span>':''}</div>
-    <div class="fmeta">${nRun} runs · ${nSta} stations${f.cap?(" · cap "+f.cap):""}${f.desc?("<br>"+f.desc):""}</div>
+    <div class="fmeta">${nRun} runs · ${nSta} stations${nRest?(" · "+nRest+" rest"):""}${f.cap?(" · cap "+f.cap):""}${f.desc?("<br>"+f.desc):""}</div>
     <div class="seglist">${segSummary(f.segments)}</div>
     <div class="frow"></div>`;
   const frow=c.querySelector(".frow");
@@ -451,6 +490,12 @@ function formatCard(f,opts){
     const del=el("button","btn ghost","✕"); del.style.flex="0 0 44px"; del.onclick=()=>{ if(confirm("Delete \""+f.name+"\"?")){ state.customFormats=state.customFormats.filter(x=>x.id!==f.id); save(); render(); } }; frow.appendChild(del);
   }
   return c;
+}
+function renderFormats(parent,opts){
+  let lastG=null;
+  allFormats().forEach(f=>{ const g=f.group||"My workouts";
+    if(g!==lastG){ parent.appendChild(el("h1",null,g)); lastG=g; }
+    parent.appendChild(formatCard(f,opts)); });
 }
 
 function viewToday(){
@@ -469,7 +514,7 @@ function viewToday(){
   hero.innerHTML=`<div class="eyebrow">Start a session</div><h2>Pick a format, tap Start, race the clock</h2>
     <p class="sub">One big LAP button closes each run & station. Total + every split are recorded. Screen stays awake.</p>`;
   m.appendChild(hero);
-  allFormats().forEach(f=>m.appendChild(formatCard(f)));
+  renderFormats(m,{});
   // this week count
   const wk=state.sessions.filter(s=>{ const d=new Date(); d.setHours(0,0,0,0); const dow=(d.getDay()+6)%7; const mon=new Date(d); mon.setDate(d.getDate()-dow); return s.ts>=mon.getTime(); }).length;
   m.appendChild(el("p","foot",`${wk} session${wk===1?"":"s"} logged this week · ${state.sessions.length} total`));
@@ -504,7 +549,7 @@ function viewWorkouts(){
         mi.oninput=()=>{ s.meters=+mi.value||0; s.target=s.meters+" m"; };
         row.appendChild(mi); row.appendChild(el("span","nm",""));
       } else {
-        row.innerHTML=`<span class="tag">Sta</span><span class="nm">${s.name}</span>`;
+        row.innerHTML=`<span class="tag">${s.type==="rest"?"Rest":"Sta"}</span><span class="nm">${s.name}</span>`;
         const ti=el("input"); ti.value=s.target; ti.oninput=()=>{ s.target=ti.value; }; row.appendChild(ti);
       }
       const up=el("button","mini","↑"); up.onclick=()=>{ if(i>0){ [builderSegs[i-1],builderSegs[i]]=[builderSegs[i],builderSegs[i-1]]; render(); } };
@@ -516,9 +561,10 @@ function viewWorkouts(){
     if(!builderSegs.length) list.appendChild(el("p","note","No segments yet — add a run or a station below."));
     bc.appendChild(list);
 
-    const addRun=el("button","btn ghost","+ Run 1000 m"); addRun.style.marginTop="10px";
-    addRun.onclick=()=>{ builderSegs.push(run(1000)); render(); };
-    bc.appendChild(addRun);
+    const addRow=el("div","frow"); addRow.style.marginTop="10px";
+    const addRun=el("button","btn ghost","+ Run 1000 m"); addRun.onclick=()=>{ builderSegs.push(run(1000)); render(); };
+    const addRest=el("button","btn ghost","+ Rest 90 sec"); addRest.onclick=()=>{ builderSegs.push(rest("90 sec")); render(); };
+    addRow.appendChild(addRun); addRow.appendChild(addRest); bc.appendChild(addRow);
     bc.appendChild(el("p","note","Add a station:"));
     const chips=el("div","chips");
     RACE_ORDER.forEach(k=>{ const ch=el("div","chip",CAT[k].name); ch.onclick=()=>{ builderSegs.push(sta(k)); render(); }; chips.appendChild(ch); });
@@ -538,8 +584,7 @@ function viewWorkouts(){
   m.appendChild(bc);
 
   // format library
-  m.appendChild(el("h1",null,"Formats"));
-  allFormats().forEach(f=>m.appendChild(formatCard(f,{manage:true})));
+  renderFormats(m,{manage:true});
 
   // race reference
   const ref=el("div","card");
@@ -575,7 +620,7 @@ function openSession(id){
     <p class="sub">${s.cap?("Cap "+fmt(s.cap)+(s.capHit?" · over":" · under ✓")+" · "):""}${s.rpe?("RPE "+s.rpe):""}</p>`;
   let cum=0;
   s.segments.forEach(seg=>{ cum+=seg.splitMs||0; const r=el("div","splitrow");
-    r.innerHTML=`<span class="si ${seg.type==="run"?"run":"sta"}"></span><span class="sl">${seg.type==="run"?("Run "+seg.target):seg.name}${seg.type==="station"?(' <span style="color:var(--faint)">'+seg.target+'</span>'):""}</span><span class="ss">${fmt(seg.splitMs)}</span><span class="sc">${fmt(cum)}</span>`;
+    r.innerHTML=`<span class="si ${segClass(seg.type)}"></span><span class="sl">${segLabel(seg)}${seg.type==="station"?(' <span style="color:var(--faint)">'+seg.target+'</span>'):""}</span><span class="ss">${fmt(seg.splitMs)}</span><span class="sc">${fmt(cum)}</span>`;
     head.appendChild(r); });
   if(s.note) head.appendChild(el("p","note",'“'+s.note+'”'));
   m.appendChild(head);
@@ -604,12 +649,12 @@ function viewPRs(){
   m.appendChild(tc);
 
   // per-station PRs
-  const pc=el("div","card"); pc.appendChild(el("h2",null,"Station bests")); pc.appendChild(el("p","sub","Fastest split recorded for each station, across all sessions."));
+  const pc=el("div","card"); pc.appendChild(el("h2",null,"Station bests")); pc.appendChild(el("p","sub","Fastest split per station across all sessions. Targets vary between workouts — the best's target is shown so you compare like with like."));
   const best={};
-  state.sessions.forEach(s=>s.segments.forEach(seg=>{ if(seg.type==="station"&&seg.splitMs>0){ if(!best[seg.key]||seg.splitMs<best[seg.key].ms) best[seg.key]={ms:seg.splitMs,ts:s.ts,name:seg.name}; } }));
+  state.sessions.forEach(s=>s.segments.forEach(seg=>{ if(seg.type==="station"&&seg.splitMs>0){ if(!best[seg.key]||seg.splitMs<best[seg.key].ms) best[seg.key]={ms:seg.splitMs,ts:s.ts,name:seg.name,target:seg.target}; } }));
   const keys=RACE_ORDER.filter(k=>best[k]);
   if(!keys.length){ pc.appendChild(el("div","empty","No station splits yet.")); }
-  else keys.forEach(k=>{ const b=best[k]; const r=el("div","prrow"); r.innerHTML=`<span class="pn">${CAT[k].name}</span><span class="pv">${fmt(b.ms)}</span><span class="pd">${fmtDate(b.ts)}</span>`; pc.appendChild(r); });
+  else keys.forEach(k=>{ const b=best[k]; const r=el("div","prrow"); r.innerHTML=`<span class="pn">${CAT[k].name} <span class="pd">${b.target||""}</span></span><span class="pv">${fmt(b.ms)}</span><span class="pd">${fmtDate(b.ts)}</span>`; pc.appendChild(r); });
   m.appendChild(pc);
 
   // best run pace (1000m)
