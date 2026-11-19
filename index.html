@@ -272,14 +272,15 @@ function segColorVar(t){ return t==="run"?"var(--accent)": t==="rest"?"var(--war
 function segClass(t){ return t==="run"?"run": t==="rest"?"rest":"sta"; }
 function rounds(n,piecesFn,restLabel){ const s=[]; for(let i=0;i<n;i++){ piecesFn(i).forEach(p=>s.push(p)); if(restLabel&&i<n-1) s.push(rest(restLabel)); } return s; }
 function fullSegs(){ const s=[]; RACE_ORDER.forEach(k=>{ s.push(run(1000)); s.push(sta(k)); }); return s; }
-function halfSegs(){ return ["ski","push","pull","burpee"].flatMap(k=>[run(1000),sta(k)]); }
+function halfSegs(){ const half={ski:"500 m",push:"25 m · 152 kg",pull:"25 m · 103 kg",burpee:"40 m",row:"500 m",farmer:"100 m · 2×24 kg",lunge:"50 m · 20 kg",wall:"50 · 6 kg"};
+  return RACE_ORDER.flatMap(k=>[run(800),sta(k,half[k])]); }
 
 function builtinFormats(){
   return [
     {id:"full", name:"Full Hyrox", isBenchmark:true, builtin:true, group:"Benchmark & test",
       desc:"Official race — 8×1 km run + 8 stations, in order.", segments:fullSegs()},
     {id:"half", name:"Half Hyrox", isBenchmark:false, builtin:true, group:"Benchmark & test",
-      desc:"4 rounds · run + station (Ski, Sled Push, Sled Pull, Burpees).", segments:halfSegs()},
+      desc:"All 8 stations at 50% — full race weights, half distance/reps — with 800 m runs between.", segments:halfSegs()},
 
     {id:"ladder", name:"Descending Race Ladder", isBenchmark:false, builtin:true, group:"Race-prep sessions", cap:"35:00",
       desc:"Closing Distance — stations in race order, descending runs. For time; RPE 8.",
