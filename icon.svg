@@ -1,17 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#14171A"/>
-  <g fill="none" stroke="#C8F02D" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
-    <!-- stopwatch body -->
-    <circle cx="256" cy="292" r="150"/>
-    <!-- top stem + crown -->
-    <line x1="256" y1="100" x2="256" y2="142"/>
-    <line x1="214" y1="100" x2="298" y2="100"/>
-    <!-- side button -->
-    <line x1="372" y1="156" x2="398" y2="130"/>
-    <!-- hand pointing up-right (race in progress) -->
-    <line x1="256" y1="292" x2="256" y2="196"/>
-    <line x1="256" y1="292" x2="318" y2="330"/>
-  </g>
-  <circle cx="256" cy="292" r="16" fill="#C8F02D"/>
-  <text x="256" y="486" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="56" font-weight="800" fill="#C8F02D" letter-spacing="3">HYROX</text>
+  <rect width="512" height="512" fill="#000000"/>
+  <text x="256" y="248" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="118" font-weight="800" fill="#C8F02D" letter-spacing="2">HYROX</text>
+  <text x="256" y="332" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="56" font-weight="600" fill="#C8F02D" letter-spacing="10">TRAINING</text>
 </svg>
