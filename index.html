@@ -313,7 +313,27 @@ function builtinFormats(){
 
     {id:"fullsim", name:"The Full Sim", isBenchmark:false, builtin:true, group:"Race-prep sessions",
       desc:"4 rounds · 1 km run then one station (sled pull / ski / wall balls / lunges). Zero rest — closest to race day.",
-      segments:rounds(4,i=>[run(1000),sta(["pull","ski","wall","lunge"][i])],null)}
+      segments:rounds(4,i=>[run(1000),sta(["pull","ski","wall","lunge"][i])],null)},
+
+    {id:"run1k", name:"1K Race-Pace Repeats", isBenchmark:false, builtin:true, group:"Run block",
+      desc:"6 × 1 km at goal Hyrox run pace · 90 s jog rest. The most race-specific run you can do.",
+      segments:rounds(6,()=>[run(1000)],"90 sec")},
+
+    {id:"threshold", name:"Threshold / Tempo", isBenchmark:false, builtin:true, group:"Run block",
+      desc:"4 × 1500 m comfortably hard (threshold) · 75 s rest. Lifts the pace you can hold before lactate piles up.",
+      segments:rounds(4,()=>[run(1500)],"75 sec")},
+
+    {id:"vo2", name:"VO₂max 800s", isBenchmark:false, builtin:true, group:"Run block",
+      desc:"6 × 800 m hard (3–5 K effort) · ~3 min rest. Builds the top-end engine so race pace feels easy.",
+      segments:rounds(6,()=>[run(800)],"3 min")},
+
+    {id:"pyramid", name:"Track Pyramid", isBenchmark:false, builtin:true, group:"Run block",
+      desc:"200→1000→200 m ladder at 5 K pace · jog half the rep just run. Speed, threshold and pace control in one.",
+      segments:[run(200),rest("100 m jog"),run(400),rest("200 m jog"),run(600),rest("300 m jog"),run(800),rest("400 m jog"),run(1000),rest("500 m jog"),run(800),rest("400 m jog"),run(600),rest("300 m jog"),run(400),rest("200 m jog"),run(200)]},
+
+    {id:"speed400", name:"Speed & Economy 400s", isBenchmark:false, builtin:true, group:"Run block",
+      desc:"10 × 400 m at mile–5 K pace · 60 s rest. Sharpens leg speed and running economy.",
+      segments:rounds(10,()=>[run(400)],"60 sec")}
   ];
 }
 function allFormats(){ return builtinFormats().concat((state.customFormats||[]).map(f=>Object.assign({builtin:false},f))); }
