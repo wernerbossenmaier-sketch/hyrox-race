@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="HYROX RACE">
+<meta name="theme-color" content="#14171A">
+<link rel="apple-touch-icon" sizes="180x180" href="/hyrox-race/icon-hx-180.png">
+<link rel="icon" type="image/png" href="/hyrox-race/icon-hx-180.png">
+<title>Hyrox Race</title>
+<!-- ============================================================
+  HYROX RACE — live split timer + session recorder (single-file, offline).
+  Sibling to the Hyrox Trainer planner; same lime-on-dark language + durability.
+
+  MODEL
+  - A FORMAT is an ordered list of segments, each {type:'run'|'station', key, name, target, meters?}.
+    Built-ins: FULL (official 8+8 race order, benchmark) and HALF (4 rounds). Custom formats
+    (incl. ladder-style) live in state.customFormats and are built with run()/sta().
+  - Timer T runs ONE continuous clock, timestamp-anchored on Date.now() so it stays accurate
+    when iOS throttles the backgrounded tab. One LAP tap closes a segment and starts the next;
+    transition (roxzone) folds into the segment you just finished. Undo/Pause supported.
+  - A live snapshot is persisted every lap + tick so a lock/kill mid-session can be resumed.
+  - On finish → review → save a session {segments:[{...,splitMs}], totalMs, cap, rpe, note, isBenchmark}.
+
+  STORAGE (key "hyroxrace_v1"): localStorage primary + IndexedDB mirror + navigator.storage.persist();
+  on launch adopt whichever store has more sessions (partial-wipe self-heal). Export/Restore JSON.
+
+  TABS: Today (start) · Workouts (formats + builder + race reference) · History · PRs.
+============================================================= -->
+<style>
+  :root{
+    --bg:#14171A; --surface:#1C2025; --surface2:#242A30; --line:#2E353C;
+    --text:#ECEFF1; --muted:#8A949E; --faint:#5B656E;
+    --accent:#C8F02D; --accent-ink:#14171A; --warn:#E8A33D; --ok:#5FD08A; --sta:#5BD6E8;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --safe-b:env(safe-area-inset-bottom,0px);
+    --safe-t:env(safe-area-inset-top,0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+    font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased}
+  body{padding-top:calc(var(--safe-t) + 52px);padding-bottom:calc(var(--safe-b) + 68px)}
+
+  header{position:fixed;top:0;left:0;right:0;z-index:20;background:rgba(20,23,26,.92);
+    backdrop-filter:saturate(140%) blur(8px);border-bottom:1px solid var(--line);
+    padding:calc(var(--safe-t) + 9px) 16px 9px}
+  .hrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.18em;text-transform:uppercase}
+  .brand b{color:var(--accent)}
+  .hbtns{display:flex;gap:8px}
+  .iconbtn{appearance:none;background:var(--surface2);border:1px solid var(--line);color:var(--text);
+    font-size:12px;font-family:var(--mono);letter-spacing:.06em;padding:8px 10px;border-radius:8px;cursor:pointer}
+  .iconbtn:active{background:var(--line)}
+
+  main{max-width:560px;margin:0 auto;padding:16px}
+  h1{font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:4px 0 14px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+  .card h2{font-size:15px;margin:0 0 4px;letter-spacing:.01em}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 12px}
+  .hr{height:1px;background:var(--line);border:0;margin:14px 0}
+  .note{font-size:12px;color:var(--muted);line-height:1.5}
+  .foot{color:var(--faint);font-size:11px;text-align:center;padding:8px 16px 0;line-height:1.5}
+  .shealth{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle;background:var(--faint)}
+  .shealth.ok{background:var(--ok)} .shealth.warn{background:var(--warn)}
+
+  .btn{appearance:none;border:0;cursor:pointer;font-family:var(--sans);font-weight:650;font-size:15px;
+    padding:12px 16px;border-radius:10px;background:var(--accent);color:var(--accent-ink)}
+  .btn:active{filter:brightness(.92)}
+  .btn.ghost{background:var(--surface2);color:var(--text);border:1px solid var(--line);font-weight:550}
+  .btn.warn{background:transparent;border:1px solid var(--warn);color:var(--warn);font-weight:550}
+  .btn.block{width:100%;margin-top:4px}
+  input,select{background:var(--surface2);border:1px solid var(--line);color:var(--text);
+    font-family:var(--mono);font-size:16px;padding:10px 12px;border-radius:9px;outline:none}
+  input:focus,select:focus{border-color:var(--accent)}
+
+  /* Week strip */
+  .week{display:flex;gap:5px;margin-bottom:14px}
+  .week .d{flex:1;text-align:center;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:7px 0 6px}
+  .week .d.today{border-color:var(--accent)}
+  .week .d .dn{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
+  .week .d .dd{font-family:var(--mono);font-size:16px;font-weight:700;margin-top:1px}
+  .week .d.today .dd{color:var(--accent)}
+  .week .d .dot{width:5px;height:5px;border-radius:50%;background:var(--accent);margin:4px auto 0;opacity:0}
+  .week .d.has .dot{opacity:1}
+
+  /* Format card */
+  .fmt{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px}
+  .fmt .fh{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .fmt .fn{font-size:16px;font-weight:650}
+  .fmt .bench{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent-ink);background:var(--accent);padding:3px 7px;border-radius:5px}
+  .fmt .fmeta{font-family:var(--mono);font-size:12px;color:var(--muted);margin:6px 0 12px}
+  .fmt .seglist{font-family:var(--mono);font-size:11.5px;color:var(--faint);line-height:1.7;margin:0 0 12px;max-height:0;overflow:hidden;transition:max-height .2s}
+  .fmt.open .seglist{max-height:600px}
+  .fmt .frow{display:flex;gap:8px}
+  .fmt .frow .btn{flex:1}
+
+  /* Builder */
+  .seg{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
+  .seg:first-child{border-top:0}
+  .seg .tag{font-family:var(--mono);font-size:10px;width:30px;color:var(--faint);text-transform:uppercase;flex:none}
+  .seg .nm{flex:1;min-width:0;font-size:14px}
+  .seg input{font-size:13px;padding:7px 9px;width:118px;flex:none}
+  .seg .mini{width:30px;height:30px;border-radius:7px;background:var(--surface2);border:1px solid var(--line);color:var(--text);font-family:var(--mono);cursor:pointer;flex:none;display:grid;place-items:center;font-size:15px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin:8px 0 2px}
+  .chip{font-family:var(--mono);font-size:12px;padding:7px 11px;border-radius:8px;background:var(--surface2);border:1px solid var(--line);color:var(--text);cursor:pointer}
+  .chip:active{background:var(--accent);color:var(--accent-ink)}
+
+  /* History / splits */
+  .srow{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line);cursor:pointer}
+  .srow:first-child{border-top:0}
+  .srow .sdate{font-family:var(--mono);font-size:12px;color:var(--muted);width:52px;flex:none}
+  .srow .sname{flex:1;min-width:0;font-size:14px}
+  .srow .sname .sx{display:block;font-family:var(--mono);font-size:11px;color:var(--faint)}
+  .srow .stime{font-family:var(--mono);font-size:17px;font-weight:700}
+  .srow .stime.miss{color:var(--warn)}
+  .splitrow{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-family:var(--mono);font-size:13px}
+  .splitrow:first-child{border-top:0}
+  .splitrow .si{width:14px;height:14px;border-radius:4px;flex:none}
+  .splitrow .si.run{background:var(--accent)} .splitrow .si.sta{background:var(--sta)}
+  .splitrow .sl{flex:1;min-width:0;font-family:var(--sans);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .splitrow .ss{font-weight:700} .splitrow .sc{color:var(--faint);width:62px;text-align:right}
+
+  /* Stat grid + chart (reused) */
+  .stat{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:14px}
+  .stat .cell{background:var(--surface);padding:12px 10px}
+  .stat .k{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .stat .v{font-family:var(--mono);font-size:19px;font-weight:700;margin-top:3px}
+  .stat .v small{font-size:12px;color:var(--muted);font-weight:400}
+  svg.chart{width:100%;height:auto;display:block;margin-top:6px}
+  svg.chart polyline{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+  svg.chart circle{fill:var(--accent)}
+  svg.chart .grid{stroke:var(--line);stroke-width:1}
+  svg.chart text{fill:var(--faint);font-family:var(--mono);font-size:9px}
+  .prrow{display:flex;align-items:center;gap:12px;padding:11px 0;border-top:1px solid var(--line)}
+  .prrow:first-child{border-top:0}
+  .prrow .pn{flex:1;font-size:14px}
+  .prrow .pv{font-family:var(--mono);font-size:16px;font-weight:700}
+  .prrow .pd{font-family:var(--mono);font-size:11px;color:var(--faint)}
+  .empty{color:var(--muted);font-size:14px;text-align:center;padding:22px 8px}
+
+  /* Toast */
+  .toast{position:fixed;left:50%;bottom:calc(var(--safe-b) + 84px);transform:translateX(-50%) translateY(8px);
+    background:var(--accent);color:var(--accent-ink);font-family:var(--mono);font-weight:700;font-size:13px;
+    letter-spacing:.03em;padding:10px 16px;border-radius:10px;z-index:60;opacity:0;pointer-events:none;
+    transition:opacity .18s,transform .18s;box-shadow:0 8px 24px rgba(0,0,0,.45);max-width:80vw;text-align:center}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.warn{background:var(--warn)}
+
+  /* Resume banner */
+  .resume{background:var(--surface2);border:1px solid var(--accent);border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px}
+  .resume .rt{flex:1;font-size:13px}
+  .resume .rt b{font-family:var(--mono)}
+
+  /* Tab bar */
+  nav{position:fixed;bottom:0;left:0;right:0;z-index:20;background:rgba(20,23,26,.94);
+    backdrop-filter:saturate(140%) blur(8px);border-top:1px solid var(--line);display:flex;padding-bottom:var(--safe-b)}
+  nav button{flex:1;background:none;border:0;color:var(--muted);padding:9px 2px 7px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+  nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7}
+  nav button.on{color:var(--accent)}
+
+  /* ===== Live timer overlay ===== */
+  .timer{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;flex-direction:column;
+    padding:calc(var(--safe-t) + 14px) 18px calc(var(--safe-b) + 14px);overflow:hidden}
+  .timer .th{display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .timer .th .seg{color:var(--text);font-weight:700}
+  .timer .total{font-family:var(--mono);font-size:min(23vw,108px);font-weight:700;letter-spacing:.01em;text-align:center;line-height:1.02;margin:6px 0 2px;font-variant-numeric:tabular-nums}
+  .timer .nowwrap{text-align:center;margin-bottom:8px}
+  .timer .nowname{font-size:19px;font-weight:650}
+  .timer .nowname .pill{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:7px;vertical-align:middle}
+  .timer .nowsplit{font-family:var(--mono);font-size:40px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;margin-top:2px}
+  .timer .nowsplit.paused{color:var(--warn)}
+  .timer .next{font-family:var(--mono);font-size:13px;color:var(--faint);text-align:center;min-height:18px}
+  .timer .splits{flex:1;overflow-y:auto;margin:10px 0;border-top:1px solid var(--line)}
+  .timer .lap{appearance:none;border:0;cursor:pointer;width:100%;background:var(--accent);color:var(--accent-ink);
+    font-family:var(--sans);font-weight:750;font-size:22px;letter-spacing:.02em;padding:22px;border-radius:16px}
+  .timer .lap:active{filter:brightness(.9)}
+  .timer .lap.finish{background:var(--ok)}
+  .timer .ctrls{display:flex;gap:8px;margin-top:10px}
+  .timer .ctrls .btn{flex:1;font-size:14px;padding:12px 8px}
+  .timer .rpe{display:flex;gap:8px;margin:12px 0}
+  .timer .rpe button{flex:1;padding:12px 0;border-radius:9px;background:var(--surface2);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:16px;cursor:pointer}
+  .timer .rpe button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+
+  @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="hrow">
+    <div class="brand">HYROX&nbsp;<b>RACE</b></div>
+    <div class="hbtns">
+      <button class="iconbtn" id="btnExport">Export</button>
+      <button class="iconbtn" id="btnImport">Restore</button>
+      <input type="file" id="fileImport" accept="application/json" hidden>
+    </div>
+  </div>
+</header>
+
+<main id="view"></main>
+<nav id="tabs"></nav>
+
+<script>
+"use strict";
+
+/* ---------- storage shim: localStorage + in-memory fallback ---------- */
+const Store = (() => {
+  let ok=false; const mem={};
+  try{ const t="__hxr__"; localStorage.setItem(t,"1"); localStorage.removeItem(t); ok=true; }catch(e){ ok=false; }
+  return {
+    persistent: ok,
+    get(k){ try{ return ok?localStorage.getItem(k):(k in mem?mem[k]:null);}catch(e){ return k in mem?mem[k]:null; } },
+    set(k,v){ try{ ok?localStorage.setItem(k,v):(mem[k]=v);}catch(e){ mem[k]=v; } },
+    del(k){ try{ ok?localStorage.removeItem(k):(delete mem[k]);}catch(e){ delete mem[k]; } }
+  };
+})();
+const KEY="hyroxrace_v1", LIVE="hyroxrace_live";
+const storageState={ local:Store.persistent, persisted:null };
+
+/* IndexedDB mirror */
+const IDB=(()=>{ const DB="hyroxrace",ST="kv"; let dbp=null;
+  function open(){ if(dbp) return dbp;
+    dbp=new Promise((res,rej)=>{ let r; try{ r=indexedDB.open(DB,1);}catch(e){ return rej(e);}
+      r.onupgradeneeded=()=>{ try{ r.result.createObjectStore(ST);}catch(e){} };
+      r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }).catch(()=>null);
+    return dbp; }
+  return {
+    async get(k){ const db=await open(); if(!db) return null;
+      return new Promise(res=>{ try{ const q=db.transaction(ST,"readonly").objectStore(ST).get(k);
+        q.onsuccess=()=>res(q.result==null?null:q.result); q.onerror=()=>res(null);}catch(e){res(null);} }); },
+    async set(k,v){ const db=await open(); if(!db) return;
+      return new Promise(res=>{ try{ const q=db.transaction(ST,"readwrite").objectStore(ST).put(v,k);
+        q.onsuccess=()=>res(); q.onerror=()=>res();}catch(e){res();} }); }
+  };
+})();
+async function requestPersistence(){ try{ if(navigator.storage&&navigator.storage.persisted){
+  let p=await navigator.storage.persisted(); if(!p&&navigator.storage.persist) p=await navigator.storage.persist();
+  storageState.persisted=!!p; } }catch(e){ storageState.persisted=null; } }
+async function recoverFromIDB(){ try{
+  const raw=await IDB.get(KEY);
+  if(raw==null){ if((state.sessions||[]).length) IDB.set(KEY,JSON.stringify(state)); return; }
+  const idb=JSON.parse(raw);
+  const here=(state.sessions||[]).length, there=(idb.sessions||[]).length;
+  if(there>here){ state=Object.assign(structuredClone(DEFAULT),idb); Store.set(KEY,JSON.stringify(state)); render(); toast("Recovered "+there+" sessions"); }
+  else if(here>there){ IDB.set(KEY,JSON.stringify(state)); }
+}catch(e){} }
+
+/* ---------- state ---------- */
+const DEFAULT={ sessions:[], customFormats:[] };
+let state=load();
+function load(){ try{ const raw=Store.get(KEY); if(raw) return Object.assign(structuredClone(DEFAULT),JSON.parse(raw)); }catch(e){} return structuredClone(DEFAULT); }
+function save(){ const j=JSON.stringify(state); Store.set(KEY,j); IDB.set(KEY,j); }
+
+/* ---------- station catalog + format builders ---------- */
+const CAT={
+  ski:{name:"SkiErg",def:"1000 m"}, push:{name:"Sled Push",def:"50 m · 152 kg"},
+  pull:{name:"Sled Pull",def:"50 m · 103 kg"}, burpee:{name:"Burpee Broad Jumps",def:"80 m"},
+  row:{name:"Row",def:"1000 m"}, farmer:{name:"Farmers Carry",def:"200 m · 2×24 kg"},
+  lunge:{name:"Sandbag Lunges",def:"100 m · 20 kg"}, wall:{name:"Wall Balls",def:"100 · 6 kg"}
+};
+const RACE_ORDER=["ski","push","pull","burpee","row","farmer","lunge","wall"];
+function run(m){ return {type:"run",key:"run",name:"Run",target:m+" m",meters:+m}; }
+function sta(k,target){ return {type:"station",key:k,name:CAT[k].name,target:target||CAT[k].def}; }
+function fullSegs(){ const s=[]; RACE_ORDER.forEach(k=>{ s.push(run(1000)); s.push(sta(k)); }); return s; }
+function halfSegs(){ return ["ski","push","pull","burpee"].flatMap(k=>[run(1000),sta(k)]); }
+
+function builtinFormats(){
+  return [
+    {id:"full", name:"Full Hyrox", isBenchmark:true, builtin:true, desc:"Official race — 8×1 km run + 8 stations, in order.", segments:fullSegs()},
+    {id:"half", name:"Half Hyrox", isBenchmark:false, builtin:true, desc:"4 rounds · run + station (Ski, Sled Push, Sled Pull, Burpees).", segments:halfSegs()}
+  ];
+}
+function allFormats(){ return builtinFormats().concat((state.customFormats||[]).map(f=>Object.assign({builtin:false},f))); }
+function formatById(id){ return allFormats().find(f=>f.id===id); }
+
+/* ---------- helpers ---------- */
+let activeTab="today";
+const $=s=>document.querySelector(s);
+const el=(t,c,h)=>{const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e;};
+let _toastT=null;
+function toast(msg,warn){ let t=document.getElementById("toast"); if(!t){ t=el("div","toast"); t.id="toast"; document.body.appendChild(t);}
+  t.textContent=msg; t.classList.toggle("warn",!!warn); requestAnimationFrame(()=>t.classList.add("show"));
+  clearTimeout(_toastT); _toastT=setTimeout(()=>t.classList.remove("show"),1700); }
+function fmt(ms){ if(ms==null||isNaN(ms)) return "--:--"; const s=Math.floor(ms/1000); const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60; const p=n=>String(n).padStart(2,"0"); return h? h+":"+p(m)+":"+p(ss):p(m)+":"+p(ss); }
+function fmtDate(ts){ return new Date(ts).toLocaleDateString(undefined,{day:"2-digit",month:"short"}); }
+function capMs(cap){ if(!cap) return null; const m=/^(\d{1,2}):(\d{2})$/.exec(cap.trim()); return m? (+m[1]*60+ +m[2])*1000 : null; }
+function segSummary(segs){ return segs.map(s=> s.type==="run"? ("Run "+s.target) : s.name).join(" → "); }
+function uid(){ return "c"+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+
+/* ---------- Live Timer engine ---------- */
+const T={
+  active:false, overlay:null, fmt:null, segs:[], idx:0,
+  startEpoch:0, pausedAccum:0, pauseStart:0, paused:false, laps:[], cap:null, raf:null,
+  start(format, resumeSnap){
+    this.fmt=format; this.segs=format.segments.map(s=>Object.assign({},s)); this.cap=capMs(format.cap);
+    if(resumeSnap){ Object.assign(this,{idx:resumeSnap.idx, startEpoch:resumeSnap.startEpoch, pausedAccum:resumeSnap.pausedAccum,
+      pauseStart:resumeSnap.pauseStart, paused:resumeSnap.paused, laps:resumeSnap.laps.slice()}); this.cap=resumeSnap.cap??this.cap; }
+    else { this.idx=0; this.startEpoch=Date.now(); this.pausedAccum=0; this.pauseStart=0; this.paused=false; this.laps=[]; }
+    this.active=true; this.buildOverlay(); this.persist(); wakeOn(); this.loop();
+  },
+  elapsed(){ const end=this.paused? this.pauseStart : Date.now(); return Math.max(0,end-this.startEpoch-this.pausedAccum); },
+  segElapsed(){ return Math.max(0,this.elapsed()-this.laps.reduce((a,b)=>a+b,0)); },
+  lap(){ if(!this.active) return; this.laps.push(this.segElapsed()); this.idx++; this.persist();
+    if(this.idx>=this.segs.length) this.finish(); else this.refresh(); },
+  undo(){ if(!this.laps.length) return; this.laps.pop(); this.idx--; this.persist(); this.refresh(); },
+  togglePause(){ if(this.paused){ this.pausedAccum+=Date.now()-this.pauseStart; this.paused=false; } else { this.pauseStart=Date.now(); this.paused=true; } this.persist(); this.refresh(); },
+  persist(){ try{ Store.set(LIVE, JSON.stringify({fmt:{id:this.fmt.id,name:this.fmt.name,isBenchmark:!!this.fmt.isBenchmark,segments:this.segs,cap:this.fmt.cap},
+    idx:this.idx,startEpoch:this.startEpoch,pausedAccum:this.pausedAccum,pauseStart:this.pauseStart,paused:this.paused,laps:this.laps,cap:this.cap})); }catch(e){} },
+  clearLive(){ Store.del(LIVE); },
+  stopLoop(){ if(this.raf){ cancelAnimationFrame(this.raf); this.raf=null; } },
+  loop(){ this.tick(); this.raf=requestAnimationFrame(()=>this.loop()); },
+  tick(){ if(!this.active||!this.overlay) return;
+    const tot=this.overlay.querySelector("#tTotal"), ns=this.overlay.querySelector("#tNowSplit");
+    const e=this.elapsed(); if(tot) tot.textContent=fmt(e); if(ns) ns.textContent=fmt(this.segElapsed());
+    if(this.cap&&e>=this.cap&&!this._capped){ this._capped=true; if(tot) tot.style.color="var(--warn)"; }
+  },
+  buildOverlay(){
+    document.querySelectorAll(".timer").forEach(n=>n.remove());
+    const o=el("div","timer"); this.overlay=o; this._capped=false;
+    o.innerHTML=`<div class="th"><span class="fn"></span><span class="seg" id="tSeg"></span></div>
+      <div class="total" id="tTotal">00:00</div>
+      <div class="nowwrap"><div class="nowname" id="tNowName"></div><div class="nowsplit" id="tNowSplit">00:00</div></div>
+      <div class="next" id="tNext"></div>
+      <div class="splits" id="tSplits"></div>
+      <button class="lap" id="tLap">LAP → next</button>
+      <div class="ctrls">
+        <button class="btn ghost" id="tPause">Pause</button>
+        <button class="btn ghost" id="tUndo">Undo</button>
+        <button class="btn warn" id="tQuit">Quit</button>
+      </div>`;
+    o.querySelector(".fn").textContent=this.fmt.name+(this.cap?(" · cap "+fmt(this.cap)):"");
+    document.body.appendChild(o);
+    o.querySelector("#tLap").onclick=()=>this.lap();
+    o.querySelector("#tPause").onclick=()=>this.togglePause();
+    o.querySelector("#tUndo").onclick=()=>this.undo();
+    o.querySelector("#tQuit").onclick=()=>{ if(confirm("Quit this session without saving?")){ this.abort(); } };
+    this.refresh();
+  },
+  refresh(){ const o=this.overlay; if(!o) return;
+    const cur=this.segs[this.idx], nxt=this.segs[this.idx+1];
+    o.querySelector("#tSeg").textContent=(this.idx+1)+" / "+this.segs.length;
+    const pill=cur?`<span class="pill" style="background:${cur.type==="run"?"var(--accent)":"var(--sta)"}"></span>`:"";
+    o.querySelector("#tNowName").innerHTML=cur? pill+cur.name+(cur.type==="run"?(" "+cur.target):"") : "—";
+    const nm=cur&&cur.type==="station"? cur.target : "";
+    o.querySelector("#tNext").textContent=nxt? ("Next: "+(nxt.type==="run"?("Run "+nxt.target):nxt.name)) : (cur?"Last segment — finish strong":"");
+    const ns=o.querySelector("#tNowSplit"); ns.classList.toggle("paused",this.paused);
+    const pb=o.querySelector("#tPause"); if(pb) pb.textContent=this.paused?"Resume":"Pause";
+    // station target subtitle under name
+    let subEl=o.querySelector("#tSub"); if(!subEl){ subEl=el("div"); subEl.id="tSub"; subEl.style.cssText="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:2px"; o.querySelector(".nowwrap").insertBefore(subEl,ns); }
+    subEl.textContent=nm;
+    // splits list
+    const sp=o.querySelector("#tSplits"); sp.innerHTML="";
+    this.laps.forEach((ms,i)=>{ const s=this.segs[i]; const r=el("div","splitrow");
+      r.innerHTML=`<span class="si ${s.type==="run"?"run":"sta"}"></span><span class="sl">${s.type==="run"?("Run "+s.target):s.name}</span><span class="ss">${fmt(ms)}</span>`;
+      sp.appendChild(r); });
+    sp.scrollTop=sp.scrollHeight;
+    const lap=o.querySelector("#tLap"); lap.classList.toggle("finish",this.idx===this.segs.length-1);
+    lap.textContent=this.idx===this.segs.length-1? "FINISH ✓" : "LAP → next";
+    this.tick();
+  },
+  finish(){ this.active=false; this.stopLoop(); wakeOff();
+    const segs=this.segs.map((s,i)=>Object.assign({},s,{splitMs:this.laps[i]??null}));
+    const totalMs=this.laps.reduce((a,b)=>a+b,0);
+    this.review(segs,totalMs);
+  },
+  review(segs,totalMs){
+    const o=this.overlay; o.innerHTML="";
+    const capHit=this.cap&&totalMs>this.cap;
+    const head=el("div"); head.innerHTML=`<div class="th"><span class="fn" style="color:var(--accent);font-weight:700">${this.fmt.name} — done</span></div>
+      <div class="total" style="color:${capHit?"var(--warn)":"var(--text)"}">${fmt(totalMs)}</div>
+      <div class="next" style="margin-bottom:6px">${this.cap?("Cap "+fmt(this.cap)+(capHit?" · over":" · under ✓")):""}</div>`;
+    o.appendChild(head);
+    const sp=el("div","splits"); sp.style.flex="1";
+    let cum=0; segs.forEach(s=>{ cum+=s.splitMs||0; const r=el("div","splitrow");
+      r.innerHTML=`<span class="si ${s.type==="run"?"run":"sta"}"></span><span class="sl">${s.type==="run"?("Run "+s.target):s.name}</span><span class="ss">${fmt(s.splitMs)}</span><span class="sc">${fmt(cum)}</span>`;
+      sp.appendChild(r); });
+    o.appendChild(sp);
+    o.appendChild(el("div",null,`<div class="note" style="margin:4px 0 2px">Rate the effort (RPE)</div>`));
+    const rpe=el("div","rpe"); let chosen=0;
+    [6,7,8,9,10].forEach(n=>{ const b=el("button",null,n); b.onclick=()=>{ chosen=n; rpe.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b)); }; rpe.appendChild(b); });
+    o.appendChild(rpe);
+    const note=el("input"); note.placeholder="Note (optional) — how it felt, loads…"; note.style.cssText="width:100%;margin-bottom:10px";
+    o.appendChild(note);
+    const saveBtn=el("button","lap","Save session");
+    saveBtn.onclick=()=>{ this.commit(segs,totalMs,chosen,note.value.trim(),capHit); };
+    o.appendChild(saveBtn);
+    const disc=el("div","ctrls"); const db=el("button","btn warn","Discard"); db.style.width="100%";
+    db.onclick=()=>{ if(confirm("Discard this session? It won't be saved.")){ this.abort(); } };
+    disc.appendChild(db); o.appendChild(disc);
+  },
+  commit(segs,totalMs,rpe,note,capHit){
+    state.sessions.push({ id:uid(), ts:Date.now(), formatId:this.fmt.id, formatName:this.fmt.name,
+      isBenchmark:!!this.fmt.isBenchmark, segments:segs, totalMs, cap:this.cap||null, capHit:!!capHit, rpe:rpe||null, note:note||"" });
+    save(); this.clearLive(); this.close(); toast("Session saved ✓"); activeTab="history"; render();
+  },
+  abort(){ this.active=false; this.stopLoop(); wakeOff(); this.clearLive(); this.close(); render(); },
+  close(){ if(this.overlay){ this.overlay.remove(); this.overlay=null; } }
+};
+
+/* ---------- Wake Lock (keep screen on during a session) ---------- */
+let _wake=null;
+async function wakeOn(){ try{ if("wakeLock" in navigator){ _wake=await navigator.wakeLock.request("screen"); } }catch(e){} }
+function wakeOff(){ try{ if(_wake){ _wake.release(); _wake=null; } }catch(e){} }
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"&&T.active&&!_wake) wakeOn(); if(T.active) T.tick(); });
+
+/* ---------- chart (reused) ---------- */
+function lineChart(series,down){
+  if(series.length<1) return '<div class="empty">Not enough data yet.</div>';
+  const W=320,H=96,pl=8,pr=36,pt=12,pb=14;
+  const ys=series.map(p=>p.v), xs=series.map(p=>p.t);
+  let minY=Math.min(...ys),maxY=Math.max(...ys); if(minY===maxY){minY-=10000;maxY+=10000;}
+  const minX=Math.min(...xs),maxX=Math.max(...xs); const spanX=(maxX-minX)||1,spanY=(maxY-minY)||1;
+  const X=t=>pl+(t-minX)/spanX*(W-pl-pr); const Y=v=>(H-pb)-(v-minY)/spanY*(H-pt-pb);
+  const pts=series.map(p=>X(p.t).toFixed(1)+","+Y(p.v).toFixed(1)).join(" ");
+  const dots=series.map(p=>`<circle cx="${X(p.t).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="2.6"/>`).join("");
+  const g=(v)=>`<line class="grid" x1="${pl}" y1="${Y(v)}" x2="${W-pr}" y2="${Y(v)}"/><text x="${W-pr+3}" y="${Y(v)+3}">${fmt(v)}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g(maxY)}${g(minY)}${series.length>1?`<polyline points="${pts}"/>`:""}${dots}</svg>`;
+}
+
+/* ---------- views ---------- */
+function weekStrip(){
+  const w=el("div","week");
+  const now=new Date(); now.setHours(0,0,0,0);
+  const dow=(now.getDay()+6)%7; const mon=new Date(now); mon.setDate(now.getDate()-dow);
+  const names=["M","T","W","T","F","S","S"];
+  const trained={}; state.sessions.forEach(s=>{ const d=new Date(s.ts); d.setHours(0,0,0,0); trained[d.getTime()]=true; });
+  for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(mon.getDate()+i);
+    const isToday=d.getTime()===now.getTime(); const has=trained[d.getTime()];
+    const c=el("div","d"+(isToday?" today":"")+(has?" has":""));
+    c.innerHTML=`<div class="dn">${names[i]}</div><div class="dd">${d.getDate()}</div><div class="dot"></div>`;
+    w.appendChild(c); }
+  return w;
+}
+
+function formatCard(f,opts){
+  const c=el("div","fmt");
+  const nSta=f.segments.filter(s=>s.type==="station").length, nRun=f.segments.filter(s=>s.type==="run").length;
+  c.innerHTML=`<div class="fh"><span class="fn">${f.name}</span>${f.isBenchmark?'<span class="bench">Benchmark</span>':''}</div>
+    <div class="fmeta">${nRun} runs · ${nSta} stations${f.cap?(" · cap "+f.cap):""}${f.desc?("<br>"+f.desc):""}</div>
+    <div class="seglist">${segSummary(f.segments)}</div>
+    <div class="frow"></div>`;
+  const frow=c.querySelector(".frow");
+  const startB=el("button","btn","▶ Start"); startB.onclick=()=>T.start(f); frow.appendChild(startB);
+  const viewB=el("button","btn ghost","Preview"); viewB.onclick=()=>c.classList.toggle("open"); frow.appendChild(viewB);
+  if(opts&&opts.manage&&!f.builtin){
+    const del=el("button","btn ghost","✕"); del.style.flex="0 0 44px"; del.onclick=()=>{ if(confirm("Delete \""+f.name+"\"?")){ state.customFormats=state.customFormats.filter(x=>x.id!==f.id); save(); render(); } }; frow.appendChild(del);
+  }
+  return c;
+}
+
+function viewToday(){
+  const m=el("div");
+  m.appendChild(el("h1",null,"Today"));
+  // resume banner
+  const live=Store.get(LIVE);
+  if(live){ try{ const s=JSON.parse(live); const rb=el("div","resume");
+    rb.innerHTML=`<div class="rt">Session in progress — <b>${s.fmt.name}</b>, ${s.idx}/${s.fmt.segments.length} done. Pick up where you left off?</div>`;
+    const go=el("button","btn","Resume"); go.onclick=()=>{ T.start(Object.assign({},s.fmt), s); }; rb.appendChild(go);
+    const x=el("button","btn ghost","✕"); x.onclick=()=>{ Store.del(LIVE); render(); }; rb.appendChild(x);
+    m.appendChild(rb);
+  }catch(e){} }
+  m.appendChild(weekStrip());
+  const hero=el("div","card");
+  hero.innerHTML=`<div class="eyebrow">Start a session</div><h2>Pick a format, tap Start, race the clock</h2>
+    <p class="sub">One big LAP button closes each run & station. Total + every split are recorded. Screen stays awake.</p>`;
+  m.appendChild(hero);
+  allFormats().forEach(f=>m.appendChild(formatCard(f)));
+  // this week count
+  const wk=state.sessions.filter(s=>{ const d=new Date(); d.setHours(0,0,0,0); const dow=(d.getDay()+6)%7; const mon=new Date(d); mon.setDate(d.getDate()-dow); return s.ts>=mon.getTime(); }).length;
+  m.appendChild(el("p","foot",`${wk} session${wk===1?"":"s"} logged this week · ${state.sessions.length} total`));
+  return m;
+}
+
+/* ---- Workouts tab: manage + builder + reference ---- */
+let builderSegs=null, builderName="", builderCap="";
+function viewWorkouts(){
+  const m=el("div");
+  m.appendChild(el("h1",null,"Workouts"));
+
+  // builder
+  const bc=el("div","card");
+  bc.innerHTML=`<div class="eyebrow">Build a workout</div><h2>Custom / interval / ladder</h2>
+    <p class="sub">Add runs and stations in any order — e.g. a descending ladder. Save it to start timing it anytime.</p>`;
+  if(builderSegs===null){
+    const nb=el("button","btn block","+ New workout"); nb.onclick=()=>{ builderSegs=[]; builderName=""; builderCap=""; render(); };
+    bc.appendChild(nb);
+  } else {
+    const nameI=el("input"); nameI.placeholder="Workout name (e.g. Closing Distance)"; nameI.value=builderName; nameI.style.cssText="width:100%;margin-bottom:8px";
+    nameI.oninput=()=>builderName=nameI.value; bc.appendChild(nameI);
+    const capI=el("input"); capI.placeholder="Time cap mm:ss (optional)"; capI.value=builderCap; capI.inputMode="numeric"; capI.style.cssText="width:100%;margin-bottom:10px";
+    capI.oninput=()=>builderCap=capI.value; bc.appendChild(capI);
+
+    const list=el("div");
+    builderSegs.forEach((s,i)=>{
+      const row=el("div","seg");
+      if(s.type==="run"){
+        row.innerHTML=`<span class="tag">Run</span><span class="nm">Run</span>`;
+        const mi=el("input"); mi.type="number"; mi.step="100"; mi.value=s.meters; mi.inputMode="numeric";
+        mi.oninput=()=>{ s.meters=+mi.value||0; s.target=s.meters+" m"; };
+        row.appendChild(mi); row.appendChild(el("span","nm",""));
+      } else {
+        row.innerHTML=`<span class="tag">Sta</span><span class="nm">${s.name}</span>`;
+        const ti=el("input"); ti.value=s.target; ti.oninput=()=>{ s.target=ti.value; }; row.appendChild(ti);
+      }
+      const up=el("button","mini","↑"); up.onclick=()=>{ if(i>0){ [builderSegs[i-1],builderSegs[i]]=[builderSegs[i],builderSegs[i-1]]; render(); } };
+      const dn=el("button","mini","↓"); dn.onclick=()=>{ if(i<builderSegs.length-1){ [builderSegs[i+1],builderSegs[i]]=[builderSegs[i],builderSegs[i+1]]; render(); } };
+      const rm=el("button","mini","✕"); rm.onclick=()=>{ builderSegs.splice(i,1); render(); };
+      row.appendChild(up); row.appendChild(dn); row.appendChild(rm);
+      list.appendChild(row);
+    });
+    if(!builderSegs.length) list.appendChild(el("p","note","No segments yet — add a run or a station below."));
+    bc.appendChild(list);
+
+    const addRun=el("button","btn ghost","+ Run 1000 m"); addRun.style.marginTop="10px";
+    addRun.onclick=()=>{ builderSegs.push(run(1000)); render(); };
+    bc.appendChild(addRun);
+    bc.appendChild(el("p","note","Add a station:"));
+    const chips=el("div","chips");
+    RACE_ORDER.forEach(k=>{ const ch=el("div","chip",CAT[k].name); ch.onclick=()=>{ builderSegs.push(sta(k)); render(); }; chips.appendChild(ch); });
+    bc.appendChild(chips);
+
+    const row2=el("div","frow"); row2.style.marginTop="12px";
+    const saveB=el("button","btn","Save workout");
+    saveB.onclick=()=>{
+      if(!builderName.trim()) return toast("Name it first",true);
+      if(!builderSegs.length) return toast("Add at least one segment",true);
+      state.customFormats.push({ id:uid(), name:builderName.trim(), isBenchmark:false, cap:(builderCap.trim()||null), segments:builderSegs.map(s=>Object.assign({},s)) });
+      save(); builderSegs=null; toast("Workout saved ✓"); render();
+    };
+    const cancelB=el("button","btn ghost","Cancel"); cancelB.onclick=()=>{ builderSegs=null; render(); };
+    row2.appendChild(saveB); row2.appendChild(cancelB); bc.appendChild(row2);
+  }
+  m.appendChild(bc);
+
+  // format library
+  m.appendChild(el("h1",null,"Formats"));
+  allFormats().forEach(f=>m.appendChild(formatCard(f,{manage:true})));
+
+  // race reference
+  const ref=el("div","card");
+  ref.innerHTML=`<div class="eyebrow">Reference</div><h2>Official race order — Open</h2><p class="sub">8×1 km run, each followed by one station.</p>`;
+  RACE_ORDER.forEach((k,i)=>{ const r=el("div","prrow"); r.innerHTML=`<span class="pd" style="width:20px">${i+1}</span><span class="pn">${CAT[k].name}</span><span class="pd">${CAT[k].def}</span>`; ref.appendChild(r); });
+  m.appendChild(ref);
+  return m;
+}
+
+function viewHistory(){
+  const m=el("div"); m.appendChild(el("h1",null,"History"));
+  if(!state.sessions.length){ m.appendChild(el("div","card",`<div class="empty">No sessions yet. Go to Today, pick a format, and race the clock.</div>`)); return m; }
+  const c=el("div","card");
+  state.sessions.slice().reverse().forEach(s=>{
+    const row=el("div","srow");
+    row.innerHTML=`<span class="sdate">${fmtDate(s.ts)}</span>
+      <span class="sname">${s.formatName}${s.isBenchmark?' · <span style="color:var(--accent)">benchmark</span>':''}<span class="sx">${s.segments.filter(x=>x.type==="run").length} runs · ${s.segments.filter(x=>x.type==="station").length} stations${s.rpe?(" · RPE "+s.rpe):""}</span></span>
+      <span class="stime${s.capHit?" miss":""}">${fmt(s.totalMs)}</span>`;
+    row.onclick=()=>openSession(s.id);
+    c.appendChild(row);
+  });
+  m.appendChild(c);
+  return m;
+}
+function openSession(id){
+  const s=state.sessions.find(x=>x.id===id); if(!s) return;
+  const m=el("div");
+  m.appendChild(el("h1",null,"Session"));
+  const head=el("div","card");
+  head.innerHTML=`<div class="eyebrow">${fmtDate(s.ts)} · ${new Date(s.ts).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"})}</div>
+    <h2>${s.formatName}${s.isBenchmark?' <span class="bench">Benchmark</span>':''}</h2>
+    <div class="total" style="font-size:52px;text-align:left;margin:4px 0;color:${s.capHit?"var(--warn)":"var(--text)"}">${fmt(s.totalMs)}</div>
+    <p class="sub">${s.cap?("Cap "+fmt(s.cap)+(s.capHit?" · over":" · under ✓")+" · "):""}${s.rpe?("RPE "+s.rpe):""}</p>`;
+  let cum=0;
+  s.segments.forEach(seg=>{ cum+=seg.splitMs||0; const r=el("div","splitrow");
+    r.innerHTML=`<span class="si ${seg.type==="run"?"run":"sta"}"></span><span class="sl">${seg.type==="run"?("Run "+seg.target):seg.name}${seg.type==="station"?(' <span style="color:var(--faint)">'+seg.target+'</span>'):""}</span><span class="ss">${fmt(seg.splitMs)}</span><span class="sc">${fmt(cum)}</span>`;
+    head.appendChild(r); });
+  if(s.note) head.appendChild(el("p","note",'“'+s.note+'”'));
+  m.appendChild(head);
+  const row=el("div","frow");
+  const back=el("button","btn ghost","← Back"); back.onclick=()=>{ activeTab="history"; render(); };
+  const del=el("button","btn warn","Delete"); del.onclick=()=>{ if(confirm("Delete this session?")){ state.sessions=state.sessions.filter(x=>x.id!==id); save(); activeTab="history"; render(); } };
+  row.appendChild(back); row.appendChild(del); m.appendChild(row);
+  const v=$("#view"); v.innerHTML=""; v.appendChild(m); window.scrollTo(0,0);
+}
+
+function viewPRs(){
+  const m=el("div"); m.appendChild(el("h1",null,"PRs & Trend"));
+  const benches=state.sessions.filter(s=>s.isBenchmark).sort((a,b)=>a.ts-b.ts);
+  const tc=el("div","card");
+  tc.innerHTML=`<div class="eyebrow">Benchmark</div><h2>Full Hyrox total time</h2><p class="sub">Your race time across benchmark attempts — the line to drive down.</p>`;
+  if(!benches.length){ tc.appendChild(el("div","empty","No benchmark sessions yet. Run the Full Hyrox format to start the trend.")); }
+  else{
+    const series=benches.map(s=>({t:s.ts,v:s.totalMs}));
+    const best=Math.min(...benches.map(s=>s.totalMs)), last=benches[benches.length-1].totalMs;
+    const st=el("div","stat");
+    st.innerHTML=`<div class="cell"><div class="k">Best</div><div class="v">${fmt(best)}</div></div>
+      <div class="cell"><div class="k">Last</div><div class="v">${fmt(last)}</div></div>
+      <div class="cell"><div class="k">Attempts</div><div class="v">${benches.length}</div></div>`;
+    tc.appendChild(st); tc.insertAdjacentHTML("beforeend",lineChart(series,true));
+  }
+  m.appendChild(tc);
+
+  // per-station PRs
+  const pc=el("div","card"); pc.appendChild(el("h2",null,"Station bests")); pc.appendChild(el("p","sub","Fastest split recorded for each station, across all sessions."));
+  const best={};
+  state.sessions.forEach(s=>s.segments.forEach(seg=>{ if(seg.type==="station"&&seg.splitMs>0){ if(!best[seg.key]||seg.splitMs<best[seg.key].ms) best[seg.key]={ms:seg.splitMs,ts:s.ts,name:seg.name}; } }));
+  const keys=RACE_ORDER.filter(k=>best[k]);
+  if(!keys.length){ pc.appendChild(el("div","empty","No station splits yet.")); }
+  else keys.forEach(k=>{ const b=best[k]; const r=el("div","prrow"); r.innerHTML=`<span class="pn">${CAT[k].name}</span><span class="pv">${fmt(b.ms)}</span><span class="pd">${fmtDate(b.ts)}</span>`; pc.appendChild(r); });
+  m.appendChild(pc);
+
+  // best run pace (1000m)
+  let bestRun=null;
+  state.sessions.forEach(s=>s.segments.forEach(seg=>{ if(seg.type==="run"&&seg.meters>0&&seg.splitMs>0){ const per=seg.splitMs/seg.meters*1000; if(!bestRun||per<bestRun.per) bestRun={per,ts:s.ts}; } }));
+  const rc=el("div","card"); rc.appendChild(el("h2",null,"Run"));
+  if(bestRun){ const r=el("div","prrow"); r.innerHTML=`<span class="pn">Best 1 km pace</span><span class="pv">${fmt(bestRun.per)}</span><span class="pd">/km · ${fmtDate(bestRun.ts)}</span>`; rc.appendChild(r); }
+  else rc.appendChild(el("div","empty","No runs recorded yet."));
+  m.appendChild(rc);
+
+  const dd=storageState.persisted===true?"ok":storageState.persisted===false?"warn":"";
+  const dt=storageState.persisted===true?"Durable storage ON.":storageState.persisted===false?"Durable storage not granted — Export weekly.":"Checking storage…";
+  m.appendChild(el("p","foot",`<span class="shealth ${dd}"></span>${Store.persistent?"Saved on device + IndexedDB. ":"In-memory only here. "}${dt} Use Export to back up.`));
+  return m;
+}
+
+/* ---------- render ---------- */
+const TABS=[
+  ["today","Today",'<path d="M4 7h16M4 12h10M4 17h7"/><circle cx="18" cy="16" r="3"/>'],
+  ["workouts","Workouts",'<path d="M6 12h12M9 8v8M15 8v8M3 10v4M21 10v4"/>'],
+  ["history","History",'<path d="M4 6h16M4 12h16M4 18h10"/>'],
+  ["prs","PRs",'<path d="M5 19V9M12 19V5M19 19v-9"/>']
+];
+function renderTabs(){ const nav=$("#tabs"); nav.innerHTML="";
+  TABS.forEach(([id,label,icon])=>{ const b=el("button",activeTab===id?"on":"",`<svg viewBox="0 0 24 24">${icon}</svg>${label}`);
+    b.onclick=()=>{ if(builderSegs!==null&&id!=="workouts"){ /* keep builder state */ } activeTab=id; render(); window.scrollTo(0,0); }; nav.appendChild(b); });
+}
+function renderTab(){ const v=$("#view"); v.innerHTML=""; let node;
+  if(activeTab==="today") node=viewToday();
+  else if(activeTab==="workouts") node=viewWorkouts();
+  else if(activeTab==="history") node=viewHistory();
+  else node=viewPRs();
+  v.appendChild(node);
+}
+function render(){ renderTabs(); renderTab(); }
+
+/* ---------- export / import ---------- */
+$("#btnExport").onclick=()=>{ const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="hyrox-race-backup-"+new Date().toISOString().slice(0,10)+".json";
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500); };
+$("#btnImport").onclick=()=>$("#fileImport").click();
+$("#fileImport").onchange=e=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader();
+  r.onload=()=>{ try{ const d=JSON.parse(r.result); state=Object.assign(structuredClone(DEFAULT),d); save(); render(); toast("Backup restored ✓"); }catch(err){ toast("Couldn't read that file",true); } };
+  r.readAsText(f); e.target.value=""; };
+
+render();
+requestPersistence().then(()=>{ if(activeTab==="prs") renderTab(); });
+recoverFromIDB();
+</script>
+</body>
+</html>
