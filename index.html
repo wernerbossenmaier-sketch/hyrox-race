@@ -181,6 +181,7 @@
     font-family:var(--sans);font-weight:750;font-size:22px;letter-spacing:.02em;padding:22px;border-radius:16px}
   .timer .lap:active{filter:brightness(.9)}
   .timer .lap.finish{background:var(--ok)}
+  .timer .lap.start{background:var(--ok)}
   .timer .ctrls{display:flex;gap:8px;margin-top:10px}
   .timer .ctrls .btn{flex:1;font-size:14px;padding:12px 8px}
   .timer .rpe{display:flex;gap:8px;margin:12px 0}
@@ -334,14 +335,25 @@ function uid(){ return "c"+Date.now().toString(36)+Math.random().toString(36).sl
 
 /* ---------- Live Timer engine ---------- */
 const T={
-  active:false, overlay:null, fmt:null, segs:[], idx:0,
+  active:false, armed:false, overlay:null, fmt:null, segs:[], idx:0,
   startEpoch:0, pausedAccum:0, pauseStart:0, paused:false, laps:[], cap:null, raf:null,
   start(format, resumeSnap){
     this.fmt=format; this.segs=format.segments.map(s=>Object.assign({},s)); this.cap=capMs(format.cap);
     if(resumeSnap){ Object.assign(this,{idx:resumeSnap.idx, startEpoch:resumeSnap.startEpoch, pausedAccum:resumeSnap.pausedAccum,
       pauseStart:resumeSnap.pauseStart, paused:resumeSnap.paused, laps:resumeSnap.laps.slice()}); this.cap=resumeSnap.cap??this.cap; }
     else { this.idx=0; this.startEpoch=Date.now(); this.pausedAccum=0; this.pauseStart=0; this.paused=false; this.laps=[]; }
-    this.active=true; this.buildOverlay(); this.persist(); wakeOn(); this.loop();
+    this.armed=false; this.active=true; this.buildOverlay(); this.persist(); wakeOn(); this.loop();
+  },
+  /* Arm: show the timer with segment 1 and the clock at 00:00, waiting for START. */
+  arm(format){
+    this.fmt=format; this.segs=format.segments.map(s=>Object.assign({},s)); this.cap=capMs(format.cap);
+    this.idx=0; this.laps=[]; this.paused=false; this.pausedAccum=0; this.pauseStart=0; this.startEpoch=0;
+    this.armed=true; this.active=false; this.buildOverlay(); wakeOn();
+  },
+  /* Begin: the actual gun — clock starts now. */
+  begin(){
+    this.armed=false; this.active=true; this.startEpoch=Date.now(); this.pausedAccum=0; this.pauseStart=0; this.paused=false;
+    this.persist(); this.refresh(); this.loop();
   },
   elapsed(){ const end=this.paused? this.pauseStart : Date.now(); return Math.max(0,end-this.startEpoch-this.pausedAccum); },
   segElapsed(){ return Math.max(0,this.elapsed()-this.laps.reduce((a,b)=>a+b,0)); },
@@ -375,7 +387,7 @@ const T={
       </div>`;
     o.querySelector(".fn").textContent=this.fmt.name+(this.cap?(" · cap "+fmt(this.cap)):"");
     document.body.appendChild(o);
-    o.querySelector("#tLap").onclick=()=>this.lap();
+    o.querySelector("#tLap").onclick=()=>{ if(this.armed) this.begin(); else this.lap(); };
     o.querySelector("#tPause").onclick=()=>this.togglePause();
     o.querySelector("#tUndo").onclick=()=>this.undo();
     o.querySelector("#tQuit").onclick=()=>{ if(confirm("Quit this session without saving?")){ this.abort(); } };
@@ -387,7 +399,7 @@ const T={
     const pill=cur?`<span class="pill" style="background:${segColorVar(cur.type)}"></span>`:"";
     o.querySelector("#tNowName").innerHTML=cur? pill+segLabel(cur) : "—";
     const nm=cur&&cur.type==="station"? cur.target : "";
-    o.querySelector("#tNext").textContent=nxt? ("Next: "+segLabel(nxt)) : (cur?"Last segment — finish strong":"");
+    o.querySelector("#tNext").textContent=this.armed? "Ready — tap START to begin the clock" : (nxt? ("Next: "+segLabel(nxt)) : (cur?"Last segment — finish strong":""));
     const ns=o.querySelector("#tNowSplit"); ns.classList.toggle("paused",this.paused);
     const pb=o.querySelector("#tPause"); if(pb) pb.textContent=this.paused?"Resume":"Pause";
     // station target subtitle under name
@@ -399,8 +411,12 @@ const T={
       r.innerHTML=`<span class="si ${segClass(s.type)}"></span><span class="sl">${segLabel(s)}</span><span class="ss">${fmt(ms)}</span>`;
       sp.appendChild(r); });
     sp.scrollTop=sp.scrollHeight;
-    const lap=o.querySelector("#tLap"); lap.classList.toggle("finish",this.idx===this.segs.length-1);
-    lap.textContent=this.idx===this.segs.length-1? "FINISH ✓" : "LAP → next";
+    const showCtrl=!this.armed;
+    const pbn=o.querySelector("#tPause"), ubn=o.querySelector("#tUndo");
+    if(pbn) pbn.style.display=showCtrl?"":"none"; if(ubn) ubn.style.display=showCtrl?"":"none";
+    const lap=o.querySelector("#tLap");
+    if(this.armed){ lap.classList.remove("finish"); lap.classList.add("start"); lap.textContent="START"; }
+    else { lap.classList.remove("start"); lap.classList.toggle("finish",this.idx===this.segs.length-1); lap.textContent=this.idx===this.segs.length-1?"FINISH ✓":"LAP → next"; }
     this.tick();
   },
   finish(){ this.active=false; this.stopLoop(); wakeOff();
@@ -485,7 +501,7 @@ function formatCard(f,opts){
     <div class="seglist">${segSummary(f.segments)}</div>
     <div class="frow"></div>`;
   const frow=c.querySelector(".frow");
-  const startB=el("button","btn","▶ Start"); startB.onclick=()=>T.start(f); frow.appendChild(startB);
+  const startB=el("button","btn","▶ Start"); startB.onclick=()=>openPlan(f); frow.appendChild(startB);
   const viewB=el("button","btn ghost","Preview"); viewB.onclick=()=>c.classList.toggle("open"); frow.appendChild(viewB);
   if(opts&&opts.manage&&!f.builtin){
     const del=el("button","btn ghost","✕"); del.style.flex="0 0 44px"; del.onclick=()=>{ if(confirm("Delete \""+f.name+"\"?")){ state.customFormats=state.customFormats.filter(x=>x.id!==f.id); save(); render(); } }; frow.appendChild(del);
@@ -497,6 +513,28 @@ function renderFormats(parent,opts){
   allFormats().forEach(f=>{ const g=f.group||"My workouts";
     if(g!==lastG){ parent.appendChild(el("h1",null,g)); lastG=g; }
     parent.appendChild(formatCard(f,opts)); });
+}
+
+/* Plan screen: full workout laid out, then "Start workout" → arms the timer (clock at 0). */
+function openPlan(f){
+  document.querySelectorAll(".timer").forEach(n=>n.remove());
+  const nSta=f.segments.filter(s=>s.type==="station").length, nRun=f.segments.filter(s=>s.type==="run").length, nRest=f.segments.filter(s=>s.type==="rest").length;
+  const o=el("div","timer");
+  const head=el("div");
+  head.innerHTML=`<div class="th"><span class="fn">Workout plan</span><span class="seg">${f.segments.length} segments</span></div>
+    <div style="font-size:23px;font-weight:700;margin:8px 0 4px">${f.name}${f.isBenchmark?' <span class="bench">Benchmark</span>':''}</div>
+    <p class="sub" style="margin:0 0 6px">${f.desc||""}</p>
+    <div class="fmeta">${nRun} runs · ${nSta} stations${nRest?(" · "+nRest+" rest"):""}${f.cap?(" · cap "+f.cap):""}</div>`;
+  o.appendChild(head);
+  const list=el("div","splits"); list.style.flex="1";
+  let n=0; f.segments.forEach(s=>{ n++; const r=el("div","splitrow");
+    r.innerHTML=`<span class="sc" style="width:24px;text-align:left">${n}</span><span class="si ${segClass(s.type)}"></span><span class="sl">${segLabel(s)}${s.type==="station"?(' <span style="color:var(--faint)">'+s.target+'</span>'):""}</span>`;
+    list.appendChild(r); });
+  o.appendChild(list);
+  const startB=el("button","lap","▶ Start workout"); startB.onclick=()=>{ o.remove(); T.arm(f); };
+  o.appendChild(startB);
+  const back=el("div","ctrls"); const bx=el("button","btn ghost","← Back"); bx.style.width="100%"; bx.onclick=()=>o.remove(); back.appendChild(bx); o.appendChild(back);
+  document.body.appendChild(o);
 }
 
 function viewToday(){
